@@ -1,0 +1,226 @@
+version: '3'
+
+tasks:
+  default:
+    desc: List all available tasks
+    cmds:
+      - task --list
+
+  dev:
+    desc: Start HTTPS development server with live reload (Cookie mode - default)
+    deps: [_install-air, _install-caddy, _install-mkcert]
+    cmds:
+      - task: _setup-air
+        vars: {SESSION_MODE: "cookie"}
+      - task: _generate-certs
+      - task: _start-caddy
+      - task: _print-urls
+      - air
+
+  dev-url:
+    desc: Start HTTPS development server with URL parameter mode (cross-browser sync)
+    deps: [_install-air, _install-caddy, _install-mkcert]
+    cmds:
+      - task: _setup-air
+        vars: {SESSION_MODE: "url"}
+      - task: _generate-certs
+      - task: _start-caddy
+      - task: _print-urls
+      - air
+
+  dev-both:
+    desc: Start HTTPS development server with hybrid mode (URL + Cookie fallback)
+    deps: [_install-air, _install-caddy, _install-mkcert]
+    cmds:
+      - task: _setup-air
+        vars: {SESSION_MODE: "both"}
+      - task: _generate-certs
+      - task: _start-caddy
+      - task: _print-urls
+      - air
+
+  kill:
+    desc: Stop all running processes
+    cmds:
+      - killall -9 air 2>/dev/null || echo "No Air processes running"
+      - killall -9 caddy 2>/dev/null || echo "No Caddy processes running"
+      - killall -9 tmp/main 2>/dev/null || true
+
+  test_safari:
+    desc: Open 2 Safari windows side-by-side for testing multi-tab sync
+    cmds:
+      - |
+        LAN_IP=$(ifconfig | grep "inet " | grep -v 127.0.0.1 | awk '{print $2}' | head -n1)
+        ./test-browser.sh safari https://${LAN_IP}:3443
+
+  test_chrome:
+    desc: Open 2 Chrome windows side-by-side for testing multi-tab sync
+    cmds:
+      - |
+        LAN_IP=$(ifconfig | grep "inet " | grep -v 127.0.0.1 | awk '{print $2}' | head -n1)
+        ./test-browser.sh chrome https://${LAN_IP}:3443
+
+  test_firefox:
+    desc: Open 2 Firefox windows side-by-side for testing multi-tab sync
+    cmds:
+      - |
+        LAN_IP=$(ifconfig | grep "inet " | grep -v 127.0.0.1 | awk '{print $2}' | head -n1)
+        ./test-browser.sh firefox https://${LAN_IP}:3443
+
+  test_playwright:
+    desc: Run automated Playwright tests headless (CI/CD mode)
+    deps: [_install-bun, _install-playwright]
+    cmds:
+      - bun playwright test
+
+  test_playwright_headed:
+    desc: Run Playwright tests with visible browser (debugging)
+    deps: [_install-bun, _install-playwright]
+    cmds:
+      - bun playwright test --headed
+
+  test_playwright_ui:
+    desc: Run Playwright tests with interactive UI (best for development)
+    deps: [_install-bun, _install-playwright]
+    cmds:
+      - bun playwright test --ui
+
+  test_playwright_debug:
+    desc: Run Playwright tests in debug mode (step through tests)
+    deps: [_install-bun, _install-playwright]
+    cmds:
+      - bun playwright test --debug
+
+  gen_playwright:
+    desc: Generate Playwright tests from test-matrix.yml
+    deps: [_install-bun]
+    cmds:
+      - bun run scripts/gen-playwright-tests.ts
+
+  # Internal tasks
+  _install-air:
+    internal: true
+    cmds:
+      - go install github.com/air-verse/air@latest
+    status:
+      - test -f $(go env GOPATH)/bin/air
+
+  _install-caddy:
+    internal: true
+    cmds:
+      - go install github.com/caddyserver/caddy/v2/cmd/caddy@latest
+    status:
+      - test -f $(go env GOPATH)/bin/caddy
+
+  _install-mkcert:
+    internal: true
+    cmds:
+      - go install filippo.io/mkcert@latest
+      - mkcert -install
+    status:
+      - test -f $(go env GOPATH)/bin/mkcert
+
+  _generate-certs:
+    internal: true
+    cmds:
+      - |
+        LAN_IP=$(ifconfig | grep "inet " | grep -v 127.0.0.1 | awk '{print $2}' | head -n1)
+        if [ ! -f localhost.pem ] || [ ! -f localhost-key.pem ]; then
+          echo "Generating mkcert certificates for localhost and ${LAN_IP}..."
+          mkcert -cert-file localhost.pem -key-file localhost-key.pem localhost 127.0.0.1 ::1 ${LAN_IP}
+        fi
+    sources:
+      - Taskfile.yml
+    generates:
+      - localhost.pem
+      - localhost-key.pem
+
+  _start-caddy:
+    internal: true
+    cmds:
+      - |
+        # Stop any existing Caddy
+        killall -9 caddy 2>/dev/null || true
+        sleep 1
+        # Start Caddy in background
+        nohup caddy run --config Caddyfile > /dev/null 2>&1 &
+        echo $! > .caddy.pid
+        sleep 2
+
+  _setup-air:
+    internal: true
+    vars:
+      SESSION_MODE: '{{.SESSION_MODE | default "cookie"}}'
+    cmds:
+      - |
+        # Always recreate Air config with session mode flag
+        cat > .air.toml << 'EOF'
+        root = "."
+        tmp_dir = "tmp"
+
+        [build]
+          bin = "./tmp/main"
+          cmd = "env GOWORK=off go build -o ./tmp/main ."
+          args_bin = ["-session-mode", "{{.SESSION_MODE}}"]
+          delay = 1000
+          exclude_dir = ["tmp", "vendor"]
+          exclude_regex = ["_test.go"]
+          include_ext = ["go", "html"]
+          kill_delay = "500ms"
+          log = "build-errors.log"
+          send_interrupt = true
+
+        [color]
+          build = "yellow"
+          main = "magenta"
+          runner = "green"
+
+        [screen]
+          clear_on_rebuild = false
+        EOF
+        echo "✅ Air configured for session mode: {{.SESSION_MODE}}"
+
+  _install-bun:
+    internal: true
+    cmds:
+      - |
+        if ! command -v bun &> /dev/null; then
+          echo "📦 Installing Bun..."
+          curl -fsSL https://bun.sh/install | bash
+          echo "✅ Bun installed. Restart shell or run: source ~/.bashrc"
+        fi
+    status:
+      - command -v bun
+
+  _install-playwright:
+    internal: true
+    deps: [_install-bun]
+    cmds:
+      - |
+        if [ ! -d "node_modules/playwright" ]; then
+          echo "🎭 Installing Playwright via Bun..."
+          bun add -d playwright @playwright/test
+          bun playwright install
+        fi
+    status:
+      - test -d node_modules/playwright
+
+  _print-urls:
+    internal: true
+    silent: true
+    cmds:
+      - |
+        LAN_IP=$(ifconfig | grep "inet " | grep -v 127.0.0.1 | awk '{print $2}' | head -n1)
+        echo ""
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "  🔒 HTTPS Development Server (mkcert)"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "  Local:   https://localhost:3443"
+        if [ -n "$LAN_IP" ]; then
+          echo "  Network: https://${LAN_IP}:3443  📱"
+        fi
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "  ✨ Live reload enabled"
+        echo "  🔐 Trusted certificates (no warnings!)"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo ""

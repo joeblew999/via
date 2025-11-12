@@ -10,7 +10,8 @@ import (
 )
 
 var (
-	port = flag.String("port", "3000", "Server port")
+	port        = flag.String("port", "3000", "Server port")
+	sessionMode = flag.String("session-mode", "cookie", "Session mode: cookie, url, or both")
 )
 
 func main() {
@@ -18,11 +19,23 @@ func main() {
 
 	v := via.New()
 
+	// Parse session mode flag
+	var mode via.SessionMode
+	switch *sessionMode {
+	case "url":
+		mode = via.SessionModeURL
+	case "both":
+		mode = via.SessionModeBoth
+	default:
+		mode = via.SessionModeCookie
+	}
+
 	// Enable state persistence - this is the key feature!
 	v.Config(via.Options{
 		StatePersistence: true,              // Persist state across page refreshes
 		LogLvl:           via.LogLevelDebug, // Enable debug logging
 		ServerAddress:    ":" + *port,
+		SessionMode:      mode, // Configure session mode
 	})
 
 	v.Page("/", func(c *via.Context) {
