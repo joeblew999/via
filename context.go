@@ -388,6 +388,11 @@ func (c *Context) GetID() string {
 	return c.id
 }
 
+// GetApp returns the app instance (for accessing configuration).
+func (c *Context) GetApp() *V {
+	return c.app
+}
+
 // getSessionState builds a SessionState from the current context.
 func (c *Context) getSessionState() *SessionState {
 	c.signalsMux.Lock()

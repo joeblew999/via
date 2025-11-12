@@ -78,6 +78,11 @@ func (v *V) logDebug(c *Context, format string, a ...any) {
 	}
 }
 
+// GetConfig returns the current configuration.
+func (v *V) GetConfig() Options {
+	return v.cfg
+}
+
 // Config overrides the default configuration with the given configuration options.
 func (v *V) Config(cfg Options) {
 	if cfg.LogLvl != v.cfg.LogLvl {
