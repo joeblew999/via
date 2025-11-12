@@ -1,0 +1,12 @@
+# Caddyfile template - variables are substituted from Taskfile.yml
+# This file is the SOURCE TEMPLATE - do not edit the generated Caddyfile directly
+# Variables: PORT_HTTPS, FILE_CERT, FILE_KEY, PORT_BACKEND
+
+{
+	admin off
+}
+
+:{{.PORT_HTTPS}} {
+	tls {{.FILE_CERT}} {{.FILE_KEY}}
+	reverse_proxy http://127.0.0.1:{{.PORT_BACKEND}}
+}

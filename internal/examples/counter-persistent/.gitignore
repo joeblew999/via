@@ -1,0 +1,29 @@
+# Auto-generated from Taskfile.yml - DO NOT EDIT MANUALLY
+# Run 'task gen_gitignore' to regenerate
+
+# Air live reload
+.air.toml
+tmp/
+build-errors.log
+
+# Logs folder (centralized logging)
+logs/
+
+# Task runner
+.task/
+
+# Caddy (auto-generated config) and certificates
+Caddyfile
+.caddy.pid
+localhost.pem
+localhost-key.pem
+
+# macOS
+.DS_Store
+
+# Testing (all test artifacts in tests/ directory)
+tests/node_modules/
+tests/bun.lockb
+tests/playwright-report/
+tests/test-results/
+tests/.playwright/

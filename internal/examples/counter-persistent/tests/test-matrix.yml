@@ -1,0 +1,467 @@
+# Test Matrix for Via Session Modes
+# This file defines all test scenarios for manual and automated (Playwright) testing
+# Each test case specifies setup, actions, and expected outcomes
+
+version: "1.0"
+
+# Server configurations to test
+configs:
+  - id: cookie-mode
+    name: "Cookie Mode (Default)"
+    env:
+      VIA_SESSION_MODE: cookie
+    task: dev
+    description: "Traditional session cookies, single browser only"
+
+  - id: url-mode
+    name: "URL Parameter Mode"
+    env:
+      VIA_SESSION_MODE: url
+    task: dev-url
+    description: "Session ID in URL, works across browsers"
+
+  - id: both-mode
+    name: "Hybrid Mode (URL + Cookie)"
+    env:
+      VIA_SESSION_MODE: both
+    task: dev-both
+    description: "URL parameter wins, falls back to cookie"
+
+  - id: nats-mode
+    name: "NATS JetStream + URL"
+    env:
+      VIA_SESSION_MODE: both
+      VIA_STATE_STORE: nats
+      VIA_NATS_URL: "nats://localhost:4222"
+    task: dev-nats
+    description: "Multi-region sync with NATS JetStream"
+
+# Test scenarios
+tests:
+  # Cookie Mode Tests
+  - id: cookie-same-browser
+    config: cookie-mode
+    name: "Cookie mode: Same browser multi-tab sync"
+    setup:
+      - action: start_server
+        config: cookie-mode
+      - action: open_browser
+        browser: safari
+        windows: 2
+        url: "https://{{LAN_IP}}:3443"
+
+    steps:
+      - action: wait_for_load
+        timeout: 3000
+
+      - action: assert_session_ids
+        expect: same
+        description: "Both Safari windows should have same session ID"
+
+      - action: click
+        window: 1
+        selector: "#increment"
+
+      - action: wait
+        ms: 500
+
+      - action: assert_counter_value
+        window: 1
+        expect: 1
+
+      - action: assert_counter_value
+        window: 2
+        expect: 1
+        description: "Window 2 should sync immediately"
+
+      - action: refresh
+        window: 2
+
+      - action: wait_for_load
+        timeout: 3000
+
+      - action: assert_counter_value
+        window: 2
+        expect: 1
+        description: "Counter persists after refresh"
+
+      - action: click
+        window: 2
+        selector: "#increment"
+
+      - action: wait
+        ms: 500
+
+      - action: assert_counter_value
+        window: 1
+        expect: 2
+        description: "Window 1 syncs after window 2 increment"
+
+  - id: cookie-cross-browser
+    config: cookie-mode
+    name: "Cookie mode: Cross-browser isolation"
+    setup:
+      - action: start_server
+        config: cookie-mode
+      - action: open_browser
+        browser: safari
+        windows: 1
+        url: "https://{{LAN_IP}}:3443"
+      - action: open_browser
+        browser: chrome
+        windows: 1
+        url: "https://{{LAN_IP}}:3443"
+
+    steps:
+      - action: wait_for_load
+        timeout: 3000
+
+      - action: assert_session_ids
+        browsers: [safari, chrome]
+        expect: different
+        description: "Safari and Chrome should have different session IDs"
+
+      - action: click
+        browser: safari
+        selector: "#increment"
+
+      - action: wait
+        ms: 1000
+
+      - action: assert_counter_value
+        browser: safari
+        expect: 1
+
+      - action: assert_counter_value
+        browser: chrome
+        expect: 0
+        description: "Chrome should NOT sync (different session)"
+
+  # URL Parameter Mode Tests
+  - id: url-cross-browser
+    config: url-mode
+    name: "URL mode: Cross-browser sync"
+    setup:
+      - action: start_server
+        config: url-mode
+      - action: generate_session_id
+        var: SESSION_ID
+      - action: open_browser
+        browser: safari
+        windows: 1
+        url: "https://{{LAN_IP}}:3443?sid={{SESSION_ID}}"
+      - action: open_browser
+        browser: chrome
+        windows: 1
+        url: "https://{{LAN_IP}}:3443?sid={{SESSION_ID}}"
+
+    steps:
+      - action: wait_for_load
+        timeout: 3000
+
+      - action: assert_session_ids
+        browsers: [safari, chrome]
+        expect: same
+        description: "Safari and Chrome should have SAME session ID from URL"
+
+      - action: assert_session_source
+        browsers: [safari, chrome]
+        expect: "url-param"
+        description: "Session source should be 'url-param'"
+
+      - action: click
+        browser: safari
+        selector: "#increment"
+
+      - action: wait
+        ms: 500
+
+      - action: assert_counter_value
+        browser: safari
+        expect: 1
+
+      - action: assert_counter_value
+        browser: chrome
+        expect: 1
+        description: "Chrome SHOULD sync (same session)"
+
+      - action: refresh
+        browser: chrome
+
+      - action: wait_for_load
+        timeout: 3000
+
+      - action: assert_counter_value
+        browser: chrome
+        expect: 1
+        description: "Counter persists after refresh"
+
+  - id: url-no-param
+    config: url-mode
+    name: "URL mode: No parameter creates new session"
+    setup:
+      - action: start_server
+        config: url-mode
+      - action: open_browser
+        browser: safari
+        windows: 2
+        url: "https://{{LAN_IP}}:3443"
+
+    steps:
+      - action: wait_for_load
+        timeout: 3000
+
+      - action: assert_session_ids
+        expect: different
+        description: "Each window gets NEW session (no cookie in URL mode)"
+
+      - action: assert_session_source
+        expect: "new"
+
+      - action: click
+        window: 1
+        selector: "#increment"
+
+      - action: wait
+        ms: 1000
+
+      - action: assert_counter_value
+        window: 1
+        expect: 1
+
+      - action: assert_counter_value
+        window: 2
+        expect: 0
+        description: "Windows do NOT sync (different sessions)"
+
+  # Both Mode Tests
+  - id: both-url-wins
+    config: both-mode
+    name: "Both mode: URL parameter wins over cookie"
+    setup:
+      - action: start_server
+        config: both-mode
+      - action: open_browser
+        browser: safari
+        windows: 1
+        url: "https://{{LAN_IP}}:3443"
+      - action: wait_for_load
+        timeout: 3000
+      - action: get_session_id
+        browser: safari
+        var: COOKIE_SESSION
+      - action: generate_session_id
+        var: URL_SESSION
+      - action: navigate
+        browser: safari
+        url: "https://{{LAN_IP}}:3443?sid={{URL_SESSION}}"
+
+    steps:
+      - action: wait_for_load
+        timeout: 3000
+
+      - action: assert_session_id
+        browser: safari
+        expect: "{{URL_SESSION}}"
+        description: "URL parameter should override existing cookie"
+
+      - action: assert_session_source
+        browser: safari
+        expect: "url-param"
+
+  - id: both-cookie-fallback
+    config: both-mode
+    name: "Both mode: Cookie fallback when no URL param"
+    setup:
+      - action: start_server
+        config: both-mode
+      - action: open_browser
+        browser: safari
+        windows: 2
+        url: "https://{{LAN_IP}}:3443"
+
+    steps:
+      - action: wait_for_load
+        timeout: 3000
+
+      - action: assert_session_ids
+        expect: same
+        description: "Both windows use cookie (no URL param)"
+
+      - action: assert_session_source
+        expect: "cookie"
+
+      - action: click
+        window: 1
+        selector: "#increment"
+
+      - action: wait
+        ms: 500
+
+      - action: assert_counter_value
+        window: 2
+        expect: 1
+        description: "Cookie-based sync works"
+
+  - id: both-shareable-url
+    config: both-mode
+    name: "Both mode: Shareable URL cross-browser"
+    setup:
+      - action: start_server
+        config: both-mode
+      - action: open_browser
+        browser: safari
+        windows: 1
+        url: "https://{{LAN_IP}}:3443"
+      - action: wait_for_load
+        timeout: 3000
+      - action: copy_shareable_url
+        browser: safari
+        var: SHAREABLE_URL
+      - action: open_browser
+        browser: chrome
+        windows: 1
+        url: "{{SHAREABLE_URL}}"
+
+    steps:
+      - action: wait_for_load
+        timeout: 3000
+
+      - action: assert_session_ids
+        browsers: [safari, chrome]
+        expect: same
+        description: "Shareable URL enables cross-browser sync"
+
+      - action: click
+        browser: safari
+        selector: "#increment"
+
+      - action: wait
+        ms: 500
+
+      - action: assert_counter_value
+        browser: chrome
+        expect: 1
+        description: "Chrome syncs with Safari"
+
+  # NATS JetStream Tests
+  - id: nats-multi-region
+    config: nats-mode
+    name: "NATS: Multi-region sync"
+    setup:
+      - action: start_nats_server
+      - action: start_server
+        config: nats-mode
+        region: us-east-1
+      - action: start_server
+        config: nats-mode
+        region: eu-west-1
+      - action: generate_session_id
+        var: SESSION_ID
+      - action: open_browser
+        browser: safari
+        windows: 1
+        url: "https://us-east-1.example.com:3443?sid={{SESSION_ID}}"
+        server: us-east-1
+      - action: open_browser
+        browser: chrome
+        windows: 1
+        url: "https://eu-west-1.example.com:3443?sid={{SESSION_ID}}"
+        server: eu-west-1
+
+    steps:
+      - action: wait_for_load
+        timeout: 3000
+
+      - action: assert_session_ids
+        browsers: [safari, chrome]
+        expect: same
+
+      - action: assert_state_store
+        expect: "nats"
+
+      - action: click
+        browser: safari
+        selector: "#increment"
+
+      - action: wait
+        ms: 1000
+        description: "Wait for NATS propagation"
+
+      - action: assert_counter_value
+        browser: chrome
+        expect: 1
+        description: "Chrome in EU region syncs with Safari in US region"
+
+# Assertions library
+assertions:
+  - name: assert_session_ids
+    description: "Compare session IDs across windows/browsers"
+
+  - name: assert_counter_value
+    description: "Verify counter displays expected value"
+
+  - name: assert_session_source
+    description: "Verify session source (url-param, cookie, new)"
+
+  - name: assert_state_store
+    description: "Verify state store type (memory, nats)"
+
+# Manual test checklist (generated from this matrix)
+manual_tests:
+  - test: cookie-same-browser
+    checklist:
+      - "Open 2 Safari windows with same URL"
+      - "Verify both show same Session ID"
+      - "Click increment in window 1"
+      - "Verify window 2 updates to count 1"
+      - "Refresh window 2"
+      - "Verify count still shows 1"
+
+  - test: url-cross-browser
+    checklist:
+      - "Generate session ID: uuidgen | tr '[:upper:]' '[:lower:]'"
+      - "Open Safari with ?sid=SESSION_ID"
+      - "Open Chrome with same ?sid=SESSION_ID"
+      - "Verify both show same Session ID"
+      - "Verify Session Source shows 'url-param'"
+      - "Click increment in Safari"
+      - "Verify Chrome updates to count 1"
+
+# Playwright test generation
+playwright:
+  runtime: bun  # Use Bun instead of Node.js for faster installs and execution
+  output_dir: "./specs"
+  browsers: [chromium, webkit]  # chromium = Chrome, webkit = Safari
+  viewport:
+    width: 1280
+    height: 720
+  screenshot_on_failure: true
+  video: retain-on-failure
+  trace: on-first-retry
+
+  # Important: Playwright uses "contexts" not "windows"
+  # - Same context = shared cookies (like 2 Safari windows)
+  # - Different contexts = separate cookies (like Safari + Chrome)
+  # See TESTING_COMPARISON.md for details
+
+# Bun setup (simpler than Node.js)
+bun:
+  install_cmd: "curl -fsSL https://bun.sh/install | bash"
+  playwright_install: "bun add -d playwright @playwright/test && bun playwright install"
+  run_tests: "bun test playwright-tests/"
+  run_tests_ui: "bun playwright test --ui"
+
+# Task commands for automation
+task_commands:
+  - name: test_playwright
+    desc: "Run all Playwright tests (automated)"
+    cmd: "task test_playwright"
+
+  - name: test_playwright_ui
+    desc: "Run Playwright tests with interactive UI"
+    cmd: "task test_playwright_ui"
+
+  - name: gen_playwright
+    desc: "Generate Playwright tests from this matrix"
+    cmd: "task gen_playwright"
