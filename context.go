@@ -16,6 +16,9 @@ import (
 // It binds user state and actions, manages reactive signals, and defines UI through View.
 type Context struct {
 	id                string
+	sessionID         string        // Session ID for state persistence (shared across tabs/refreshes)
+	sessionSource     SessionSource // Where the session ID came from (cookie, url-param, or new)
+	route             string        // Current page route
 	app               *V
 	view              func() h.H
 	componentRegistry map[string]*Context
@@ -24,6 +27,8 @@ type Context struct {
 	actionRegistry    map[string]func()
 	signals           map[string]*signal
 	signalsMux        sync.Mutex
+	state             map[string]any // Arbitrary application state (persisted if StatePersistence enabled)
+	stateMux          sync.Mutex     // Mutex for state access
 }
 
 // View defines the UI rendered by this context.
@@ -184,6 +189,7 @@ func (c *Context) injectSignals(sigs map[string]any) {
 // Sync pushes the current view state and signal changes to the browser immediately
 // over the live SSE event stream.
 func (c *Context) Sync() {
+	c.app.logDebug(c, "Sync() called")
 	// components use parent page sse stream
 	var sse *datastar.ServerSentEventGenerator
 	if c.isComponent() {
@@ -195,11 +201,13 @@ func (c *Context) Sync() {
 		c.app.logWarn(c, "view out of sync: no sse stream")
 		return
 	}
+	c.app.logDebug(c, "Rendering view for sync")
 	elemsPatch := bytes.NewBuffer(make([]byte, 0))
 	if err := c.view().Render(elemsPatch); err != nil {
 		c.app.logErr(c, "sync view failed: %v", err)
 		return
 	}
+	c.app.logDebug(c, "Sending patch to client")
 	_ = sse.PatchElements(elemsPatch.String())
 	updatedSigs := make(map[string]any)
 	for id, sig := range c.signals {
@@ -297,6 +305,130 @@ func (c *Context) ExecScript(s string) {
 	_ = sse.ExecuteScript(s)
 }
 
+// SetState stores an arbitrary value in the session state (if StatePersistence is enabled).
+// The state persists across page refreshes and syncs across multiple browser tabs.
+func (c *Context) SetState(key string, value any) {
+	c.stateMux.Lock()
+	if c.state == nil {
+		c.state = make(map[string]any)
+	}
+	c.state[key] = value
+	c.stateMux.Unlock()
+
+	// Persist to state store if enabled (do this AFTER releasing the lock)
+	if c.app.cfg.StatePersistence && c.app.stateStore != nil && c.sessionID != "" {
+		sessionState := c.getSessionState()
+		err := c.app.stateStore.Set(c.sessionID, sessionState)
+		if err == nil {
+			c.app.logDebug(c, "📤 State updated and broadcast to other tabs: key='%s', session=%s", key, c.sessionID)
+		} else {
+			c.app.logWarn(c, "Failed to broadcast state update: %v", err)
+		}
+	}
+}
+
+// GetState retrieves a value from the session state.
+func (c *Context) GetState(key string) (any, bool) {
+	c.stateMux.Lock()
+	defer c.stateMux.Unlock()
+
+	if c.state == nil {
+		return nil, false
+	}
+	val, ok := c.state[key]
+	return val, ok
+}
+
+// StateInt retrieves an integer value from session state with a default fallback.
+func (c *Context) StateInt(key string, defaultVal int) int {
+	if val, ok := c.GetState(key); ok {
+		if i, ok := val.(int); ok {
+			return i
+		}
+		// Try float64 (from JSON deserialization)
+		if f, ok := val.(float64); ok {
+			return int(f)
+		}
+	}
+	return defaultVal
+}
+
+// StateString retrieves a string value from session state with a default fallback.
+func (c *Context) StateString(key string, defaultVal string) string {
+	if val, ok := c.GetState(key); ok {
+		if s, ok := val.(string); ok {
+			return s
+		}
+	}
+	return defaultVal
+}
+
+// StateBool retrieves a boolean value from session state with a default fallback.
+func (c *Context) StateBool(key string, defaultVal bool) bool {
+	if val, ok := c.GetState(key); ok {
+		if b, ok := val.(bool); ok {
+			return b
+		}
+	}
+	return defaultVal
+}
+
+// GetSessionID returns the session ID for debugging purposes.
+func (c *Context) GetSessionID() string {
+	return c.sessionID
+}
+
+// GetSessionSource returns the session source for debugging purposes.
+func (c *Context) GetSessionSource() SessionSource {
+	return c.sessionSource
+}
+
+// GetID returns the context ID for debugging purposes.
+func (c *Context) GetID() string {
+	return c.id
+}
+
+// getSessionState builds a SessionState from the current context.
+func (c *Context) getSessionState() *SessionState {
+	c.signalsMux.Lock()
+	signals := make(map[string]any)
+	for id, sig := range c.signals {
+		signals[id] = fmt.Sprintf("%v", sig.v)
+	}
+	c.signalsMux.Unlock()
+
+	c.stateMux.Lock()
+	state := make(map[string]any)
+	for k, v := range c.state {
+		state[k] = v
+	}
+	c.stateMux.Unlock()
+
+	return &SessionState{
+		SessionID: c.sessionID,
+		Route:     c.route,
+		Signals:   signals,
+		State:     state,
+	}
+}
+
+// loadSessionState loads state from a SessionState into the context.
+func (c *Context) loadSessionState(sessionState *SessionState) {
+	if sessionState == nil {
+		return
+	}
+
+	// Load state
+	c.stateMux.Lock()
+	if c.state == nil {
+		c.state = make(map[string]any)
+	}
+	for k, v := range sessionState.State {
+		c.state[k] = v
+	}
+	c.stateMux.Unlock()
+}
+
 func newContext(id string, a *V) *Context {
 	if a == nil {
 		log.Fatalf("create context failed: app pointer is nil")
@@ -308,5 +440,6 @@ func newContext(id string, a *V) *Context {
 		componentRegistry: make(map[string]*Context),
 		actionRegistry:    make(map[string]func()),
 		signals:           make(map[string]*signal),
+		state:             make(map[string]any),
 	}
 }

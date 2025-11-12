@@ -37,6 +37,7 @@ type V struct {
 	documentFootIncludes      []h.H
 	devModePageInitFnMap      map[string]func(*Context)
 	devModePageInitFnMapMutex sync.Mutex
+	stateStore                StateStore // Optional state store for session persistence
 }
 
 func (v *V) logErr(c *Context, format string, a ...any) {
@@ -98,6 +99,14 @@ func (v *V) Config(cfg Options) {
 	if cfg.ServerAddress != "" {
 		v.cfg.ServerAddress = cfg.ServerAddress
 	}
+	if cfg.StatePersistence {
+		v.cfg.StatePersistence = true
+		if cfg.StateStore != nil {
+			v.stateStore = cfg.StateStore
+		} else {
+			v.stateStore = NewMemoryStore()
+		}
+	}
 }
 
 // AppendToHead appends the given h.H nodes to the head of the base HTML document.
@@ -142,9 +151,31 @@ func (v *V) Page(route string, initContextFn func(c *Context)) {
 		}
 		id := fmt.Sprintf("%s_/%s", route, genRandID())
 		c := newContext(id, v)
+
+		// Register context FIRST so SSE can find it
+		v.logDebug(c, "Registering context with ID: %s", c.id)
+		v.registerCtx(c.id, c)
+		v.logDebug(c, "Context registered, registry size: %d", len(v.contextRegistry))
+
+		// Session management (if StatePersistence is enabled)
+		if v.cfg.StatePersistence && v.stateStore != nil {
+			sessionID, sessionSource := v.extractSessionID(w, r)
+			v.logDebug(c, "Session ID: %s (source: %s, route: %s)", sessionID, sessionSource, route)
+			c.sessionID = sessionID
+			c.sessionSource = sessionSource
+			c.route = route
+
+			// Load existing session state
+			if sessionState, err := v.stateStore.Get(sessionID); err == nil {
+				v.logDebug(c, "Loaded existing session state with %d state keys", len(sessionState.State))
+				c.loadSessionState(sessionState)
+			} else {
+				v.logDebug(c, "No existing session state found (new session)")
+			}
+		}
+
 		v.logDebug(c, "GET %s", route)
 		initContextFn(c)
-		v.registerCtx(c.id, c)
 		headElements := v.documentHeadIncludes
 		headElements = append(headElements, h.Meta(h.Data("signals", fmt.Sprintf("{'via-ctx':'%s'}", id))))
 		headElements = append(headElements, h.Meta(h.Data("init", "@get('/_sse')")))
@@ -290,13 +321,41 @@ func New() *V {
 			}
 		}
 		cID, _ := sigs["via-ctx"].(string)
+		v.logDebug(nil, "SSE looking for context ID: %s, registry size: %d", cID, len(v.contextRegistry))
 		c, err := v.getCtx(cID)
 		if err != nil {
-			v.logErr(nil, "failed to render page: %v", err)
+			// Debug: print all registered IDs
+			v.contextRegistryMutex.RLock()
+			registeredIDs := make([]string, 0, len(v.contextRegistry))
+			for id := range v.contextRegistry {
+				registeredIDs = append(registeredIDs, id)
+			}
+			v.contextRegistryMutex.RUnlock()
+			v.logErr(nil, "failed to render page: %v, registered IDs: %v", err, registeredIDs)
 			return
 		}
 		c.sse = datastar.NewSSE(w, r)
 		v.logDebug(c, "SSE connection established")
+
+		// Subscribe to state changes for multi-tab sync
+		if v.cfg.StatePersistence && v.stateStore != nil && c.sessionID != "" {
+			v.stateStore.Subscribe(c.sessionID, func(state *SessionState) {
+				// When state changes in another tab, update this tab
+				if c.sse != nil && state != nil {
+					v.logDebug(c, "📡 Multi-tab broadcast received! Session: %s, State keys: %d", c.sessionID, len(state.State))
+					// Load the updated state
+					c.loadSessionState(state)
+					// Re-render the view with the new state
+					// The view function will re-read from c.state using StateInt/StateString/etc
+					c.Sync()
+					v.logDebug(c, "✅ Sync completed after receiving multi-tab update")
+				} else {
+					v.logDebug(c, "⚠️  Multi-tab broadcast ignored (SSE=%v, state=%v)", c.sse != nil, state != nil)
+				}
+			})
+			v.logDebug(c, "✅ Subscribed to multi-tab updates for session: %s", c.sessionID)
+		}
+
 		if v.cfg.DevMode {
 			c.Sync()
 			v.persistCtx(c)
@@ -304,6 +363,13 @@ func New() *V {
 			c.SyncSignals()
 		}
 		<-c.sse.Context().Done()
+
+		// Unsubscribe when SSE closes
+		if v.cfg.StatePersistence && v.stateStore != nil && c.sessionID != "" {
+			v.stateStore.Unsubscribe(c.sessionID)
+			v.logDebug(c, "Unsubscribed from session state updates: %s", c.sessionID)
+		}
+
 		c.sse = nil
 		v.logDebug(c, "SSE connection closed")
 	})
@@ -339,9 +405,9 @@ func New() *V {
 			}
 		}()
 		c.signalsMux.Lock()
-		defer c.signalsMux.Unlock()
 		v.logDebug(c, "signals=%v", sigs)
 		c.injectSignals(sigs)
+		c.signalsMux.Unlock()
 		actionFn()
 
 	})
@@ -352,4 +418,89 @@ func genRandID() string {
 	b := make([]byte, 16)
 	rand.Read(b)
 	return hex.EncodeToString(b)[:8]
+}
+
+// SessionSource indicates where the session ID was extracted from
+type SessionSource string
+
+const (
+	SessionSourceCookie  SessionSource = "cookie"
+	SessionSourceURL     SessionSource = "url-param"
+	SessionSourceNew     SessionSource = "new"
+)
+
+// extractSessionID retrieves or creates a session ID based on SessionMode configuration.
+// Returns the session ID and its source (cookie, url-param, or new).
+func (v *V) extractSessionID(w http.ResponseWriter, r *http.Request) (string, SessionSource) {
+	// Determine parameter name (default: "sid")
+	paramName := v.cfg.SessionParamName
+	if paramName == "" {
+		paramName = "sid"
+	}
+
+	var sessionID string
+	var source SessionSource
+
+	switch v.cfg.SessionMode {
+	case SessionModeURL:
+		// URL parameter only
+		sessionID = r.URL.Query().Get(paramName)
+		if sessionID != "" {
+			source = SessionSourceURL
+			v.logDebug(nil, "🔗 Session from URL parameter '%s': %s", paramName, sessionID)
+		}
+
+	case SessionModeBoth:
+		// Try URL parameter first, fallback to cookie
+		sessionID = r.URL.Query().Get(paramName)
+		if sessionID != "" {
+			source = SessionSourceURL
+			v.logDebug(nil, "🔗 Session from URL parameter '%s': %s (mode: Both)", paramName, sessionID)
+		} else {
+			cookie, err := r.Cookie("via-session-id")
+			if err == nil && cookie.Value != "" {
+				sessionID = cookie.Value
+				source = SessionSourceCookie
+				v.logDebug(nil, "🍪 Session from cookie (fallback): %s (mode: Both)", sessionID)
+			}
+		}
+
+	default: // SessionModeCookie (default, backward compatible)
+		cookie, err := r.Cookie("via-session-id")
+		if err == nil && cookie.Value != "" {
+			sessionID = cookie.Value
+			source = SessionSourceCookie
+			v.logDebug(nil, "🍪 Session from cookie: %s (mode: Cookie)", sessionID)
+		}
+	}
+
+	// Create new session if none found
+	if sessionID == "" {
+		sessionID = "sess-" + genRandID()
+		source = SessionSourceNew
+
+		// Set cookie for Cookie and Both modes (not for URL mode)
+		if v.cfg.SessionMode != SessionModeURL {
+			http.SetCookie(w, &http.Cookie{
+				Name:   "via-session-id",
+				Value:  sessionID,
+				Path:   "/",
+				MaxAge: 86400 * 30, // 30 days
+				// Note: HttpOnly, Secure, and SameSite are intentionally omitted
+				// to maximize Safari compatibility for localhost cookie sharing across tabs
+			})
+			v.logDebug(nil, "🆕 New session cookie created: %s (mode: %s)", sessionID, v.cfg.SessionMode)
+		} else {
+			v.logDebug(nil, "🆕 New session created: %s (mode: URL, no cookie set)", sessionID)
+		}
+	}
+
+	return sessionID, source
+}
+
+// getOrCreateSessionID retrieves the session ID from cookie or creates a new one.
+// Deprecated: Use extractSessionID() instead for SessionMode support.
+func (v *V) getOrCreateSessionID(w http.ResponseWriter, r *http.Request) string {
+	sessionID, _ := v.extractSessionID(w, r)
+	return sessionID
 }
