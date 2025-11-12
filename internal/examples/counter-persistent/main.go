@@ -113,14 +113,16 @@ func main() {
 		})
 	})
 
-	// Print network URLs before starting
-	printNetworkURLs(*port)
+	// Print network URLs and configuration before starting
+	printStartupInfo(v, *port)
 
 	v.Start()
 }
 
-// printNetworkURLs displays localhost and LAN IP URLs
-func printNetworkURLs(port string) {
+// printStartupInfo displays server URLs and active configuration
+func printStartupInfo(v *via.V, port string) {
+	cfg := v.GetConfig()
+
 	fmt.Println("\n" + "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 	fmt.Printf("  🔒 Via Backend (proxied via Caddy)\n")
 	fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
@@ -133,7 +135,22 @@ func printNetworkURLs(port string) {
 	if lanIP := getLANIP(); lanIP != "" {
 		fmt.Printf("  Network: https://%s:3443  📱\n", lanIP)
 	}
+
 	fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+	fmt.Printf("  ⚙️  Configuration\n")
+	fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+	fmt.Printf("  Session Mode:  %s\n", cfg.SessionMode)
+	fmt.Printf("  State Store:   MemoryStore (in-process)\n")
+
+	// Show cross-browser sync capability
+	if cfg.SessionMode == via.SessionModeURL || cfg.SessionMode == via.SessionModeBoth {
+		fmt.Printf("  Cross-Browser: ✅ Enabled (shareable URLs)\n")
+	} else {
+		fmt.Printf("  Cross-Browser: ❌ Disabled (cookie-only)\n")
+	}
+
+	fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+	fmt.Println()
 }
 
 // getLANIP returns the local network IP address
