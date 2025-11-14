@@ -1,27 +1,28 @@
 import { test, expect, Page, Browser } from '@playwright/test';
+import { ChildProcess } from 'child_process';
+import { startServer, stopServer } from '../scripts/server-utils';
 
 /**
- * Both mode: Shareable URL cross-browser
+ * Both mode: URL parameter wins over cookie
  *
  * Configuration: Hybrid Mode (URL + Cookie)
  * Description: URL parameter wins, falls back to cookie
  */
 
-test.describe('Both mode: Shareable URL cross-browser', () => {
+test.describe('Both mode: URL parameter wins over cookie', () => {
+  let serverProcess: ChildProcess | null = null;
+
   test.beforeAll(async () => {
-    // TODO: Start server with environment variables
-    // {
-    //   "VIA_SESSION_MODE": "both"
-    // }
-    console.log('⚠️  Start server manually with: task dev-both');
+    // Start server with correct configuration
+    serverProcess = await startServer('dev-both');
   });
 
   test.afterAll(async () => {
-    // TODO: Stop server
-    console.log('⚠️  Stop server manually with: task kill');
+    // Stop server and cleanup
+    await stopServer(serverProcess);
   });
 
-  test('both-shareable-url', async ({ browser }) => {
+  test('both-url-wins', async ({ browser }) => {
     // Create browser context and pages
     const context = await browser.newContext({ ignoreHTTPSErrors: true });
     const page = await context.newPage();
@@ -29,25 +30,12 @@ test.describe('Both mode: Shareable URL cross-browser', () => {
 
 
     // Test steps
-    // Assert session IDs are same
-    // Shareable URL enables cross-browser sync
-    const sessionId1 = await getSessionId(page1);
-    const sessionId2 = await getSessionId(page2);
-    expect(sessionId1 === sessionId2).toBeTruthy();
+    // TODO: Implement action 'assert_session_id'
+    // {"action":"assert_session_id","browser":"safari","expect":"{{URL_SESSION}}","description":"URL parameter should override existing cookie"}
 
-    // Click #increment
-    await Promise.all([
-      page.waitForResponse(resp => resp.url().includes('/_action/')),
-      page.getByRole('button', { name: 'Increment' }).click()
-    ]);
-
-    // Wait 500ms
-    await page1.waitForTimeout(500);
-
-    // Assert counter value is 1
-    // Chrome syncs with Safari
-    const counter0 = await getCounterValue(page);
-    expect(counter0).toBe(1);
+    // Assert session source is 'url-param'
+    const source = await getSessionSource(page);
+    expect(source).toBe('url-param');
 
 
     

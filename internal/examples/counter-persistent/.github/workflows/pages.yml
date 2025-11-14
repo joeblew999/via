@@ -1,0 +1,90 @@
+name: Deploy Test Reports to GitHub Pages
+
+on:
+  workflow_run:
+    workflows: ["Test"]
+    types:
+      - completed
+    branches: [main]
+
+  # Allow manual trigger
+  workflow_dispatch:
+
+# Sets permissions of the GITHUB_TOKEN to allow deployment to GitHub Pages
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Allow only one concurrent deployment
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    # Only run if tests passed (or on manual trigger)
+    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
+
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v1
+        with:
+          bun-version: latest
+
+      - name: Install Task
+        run: go install github.com/go-task/task/v3/cmd/task@latest
+
+      - name: Install dependencies
+        run: cd tests && bun install
+
+      - name: Run all tests
+        run: task test
+        continue-on-error: true  # Generate reports even if tests fail
+        env:
+          CI: true
+
+      - name: Prepare GitHub Pages content
+        run: |
+          # Get Taskfile variables
+          DIR_TEST_OUTPUTS=$(task vars | grep DIR_TEST_OUTPUTS | awk '{print $2}')
+          DIR_TEST_REPORTS=$(task vars | grep DIR_TEST_REPORTS | awk '{print $2}')
+
+          mkdir -p gh-pages
+
+          # Copy landing page
+          cp ${DIR_TEST_OUTPUTS}/gh-pages-index.html gh-pages/index.html
+
+          # Copy HTML reports for each mode
+          for mode in cookie-mode url-mode hybrid-mode; do
+            if [ -d "${DIR_TEST_REPORTS}/${mode}" ]; then
+              mkdir -p gh-pages/${mode}
+              cp -r ${DIR_TEST_REPORTS}/${mode}/* gh-pages/${mode}/
+            fi
+          done
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v4
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: './gh-pages'
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

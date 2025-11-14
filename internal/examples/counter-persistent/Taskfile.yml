@@ -7,8 +7,11 @@ vars:
   DIR_TMP: tmp
   DIR_TESTS: tests
   DIR_NODE_MODULES: tests/node_modules
-  DIR_TEST_RESULTS: tests/test-results
-  DIR_PLAYWRIGHT_REPORT: tests/playwright-report
+
+  # Test outputs (organized)
+  DIR_TEST_OUTPUTS: tests/outputs
+  DIR_TEST_REPORTS: tests/outputs/reports
+  DIR_TEST_ARTIFACTS: tests/outputs/artifacts
   DIR_PLAYWRIGHT_CACHE: /Users/apple/Library/Caches/ms-playwright
 
   # Ports
@@ -39,7 +42,7 @@ tasks:
     cmds:
       - task --list
 
-  vars:
+  _internal_vars:
     desc: Display all configured variables (useful for debugging)
     cmds:
       - |
@@ -77,115 +80,134 @@ tasks:
         echo "  FILE_PLAYWRIGHT_DEBUG_LOG: {{.FILE_PLAYWRIGHT_DEBUG_LOG}}"
         echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
+  # Development Server (No GUI, but not CI-safe)
   dev:
-    desc: Start HTTPS development server with live reload (Cookie mode - default)
-    deps: [gen_gitignore, _install-air, _install-caddy, _install-mkcert, _setup-logs]
+    desc: "Start HTTPS development server (alias for dev-serve)"
+    deps: [dev-serve]
+
+  dev-serve:
+    desc: "Start HTTPS development server with live reload (Cookie mode - default)"
+    deps: [_internal_gen_gitignore, _internal_install_air, _internal_install_caddy, _internal_install_mkcert, _internal_setup_logs]
     cmds:
-      - task: _setup-air
+      - task: _internal_setup_air
         vars: {SESSION_MODE: "cookie"}
-      - task: _generate-certs
-      - task: _start-caddy
-      - task: _print-urls
+      - task: _internal_generate_certs
+      - task: _internal_start_caddy
+      - task: _internal_print_urls
       - air 2>&1 | tee {{.FILE_SERVER_LOG}}
 
-  dev-url:
-    desc: Start HTTPS development server with URL parameter mode (cross-browser sync)
-    deps: [gen_gitignore, _install-air, _install-caddy, _install-mkcert, _setup-logs]
+  dev-serve-url:
+    desc: "Start HTTPS development server with URL parameter mode (cross-browser sync)"
+    deps: [_internal_gen_gitignore, _internal_install_air, _internal_install_caddy, _internal_install_mkcert, _internal_setup_logs]
     cmds:
-      - task: _setup-air
+      - task: _internal_setup_air
         vars: {SESSION_MODE: "url"}
-      - task: _generate-certs
-      - task: _start-caddy
-      - task: _print-urls
+      - task: _internal_generate_certs
+      - task: _internal_start_caddy
+      - task: _internal_print_urls
       - air 2>&1 | tee {{.FILE_SERVER_LOG}}
 
-  dev-both:
-    desc: Start HTTPS development server with hybrid mode (URL + Cookie fallback)
-    deps: [gen_gitignore, _install-air, _install-caddy, _install-mkcert, _setup-logs]
+  dev-serve-both:
+    desc: "Start HTTPS development server with hybrid mode (URL + Cookie fallback)"
+    deps: [_internal_gen_gitignore, _internal_install_air, _internal_install_caddy, _internal_install_mkcert, _internal_setup_logs]
     cmds:
-      - task: _setup-air
+      - task: _internal_setup_air
         vars: {SESSION_MODE: "both"}
-      - task: _generate-certs
-      - task: _start-caddy
-      - task: _print-urls
+      - task: _internal_generate_certs
+      - task: _internal_start_caddy
+      - task: _internal_print_urls
       - air 2>&1 | tee {{.FILE_SERVER_LOG}}
 
-  kill:
-    desc: Stop all running processes
+  dev-kill:
+    desc: "Stop all running dev servers"
     cmds:
       - killall -9 air 2>/dev/null || echo "No Air processes running"
       - killall -9 caddy 2>/dev/null || echo "No Caddy processes running"
       - killall -9 main 2>/dev/null || echo "No main processes running"
 
-  clean:
-    desc: Clean logs, test results, and build artifacts (keeps Playwright browser cache)
+  _internal_clean:
+    desc: Clean logs, test outputs, and build artifacts (keeps Playwright browser cache)
     cmds:
       - rm -rf {{.DIR_LOGS}}/
-      - rm -rf {{.DIR_TEST_RESULTS}}/
-      - rm -rf {{.DIR_PLAYWRIGHT_REPORT}}/
+      - rm -rf {{.DIR_TEST_OUTPUTS}}/
       - rm -rf {{.DIR_TMP}}/
-      - echo "✅ Cleaned logs, test results, and build artifacts"
+      - echo "✅ Cleaned logs, test outputs, and build artifacts"
 
-  clean_playwright_cache:
+  _internal_clean_playwright_cache:
     desc: Clean Playwright browser cache (WARNING - will re-download ~500MB of browsers!)
     cmds:
       - rm -rf {{.DIR_PLAYWRIGHT_CACHE}} || echo "Playwright cache already clean"
       - echo "⚠️  Playwright browser cache deleted - run 'task install_playwright' to reinstall"
 
-  install_playwright:
+  _internal_install_playwright:
     desc: Manually install/reinstall Playwright browsers (~500MB download)
-    deps: [_install-bun]
+    deps: [_internal_install_bun]
     cmds:
       - cd {{.DIR_TESTS}} && bun playwright install
       - echo "✅ Playwright browsers installed to {{.DIR_PLAYWRIGHT_CACHE}}"
 
-  test_safari:
-    desc: Open 2 Safari windows side-by-side for testing multi-tab sync
+  # Manual Testing (Opens GUI - 2 browser windows for manual testing)
+  dev-open-safari:
+    desc: "[GUI] Open 2 Safari windows side-by-side for manual testing"
     cmds:
       - |
         LAN_IP=$(ifconfig | grep "inet " | grep -v 127.0.0.1 | awk '{print $2}' | head -n1)
         {{.DIR_TESTS}}/manual/test-browser.sh safari https://${LAN_IP}:{{.PORT_HTTPS}}
 
-  test_chrome:
-    desc: Open 2 Chrome windows side-by-side for testing multi-tab sync
+  dev-open-chrome:
+    desc: "[GUI] Open 2 Chrome windows side-by-side for manual testing"
     cmds:
       - |
         LAN_IP=$(ifconfig | grep "inet " | grep -v 127.0.0.1 | awk '{print $2}' | head -n1)
         {{.DIR_TESTS}}/manual/test-browser.sh chrome https://${LAN_IP}:{{.PORT_HTTPS}}
 
-  test_firefox:
-    desc: Open 2 Firefox windows side-by-side for testing multi-tab sync
+  dev-open-firefox:
+    desc: "[GUI] Open 2 Firefox windows side-by-side for manual testing"
     cmds:
       - |
         LAN_IP=$(ifconfig | grep "inet " | grep -v 127.0.0.1 | awk '{print $2}' | head -n1)
         {{.DIR_TESTS}}/manual/test-browser.sh firefox https://${LAN_IP}:{{.PORT_HTTPS}}
 
-  test_playwright:
-    desc: Run automated Playwright tests headless (CI/CD mode)
-    deps: [_gen-playwright, _install-bun, _install-playwright, _setup-logs]
+  # CI/CD Tasks (Headless, No GUI)
+  test:
+    desc: "[CI] Run all tests headless (CI/CD safe)"
+    deps: [_internal_gen_playwright, _internal_install_bun, _internal_install_playwright_deps, _internal_setup_logs]
     cmds:
       - cd {{.DIR_TESTS}} && bun playwright test 2>&1 | tee ../{{.FILE_PLAYWRIGHT_TEST_LOG}}
 
-  test_playwright_headed:
-    desc: Run Playwright tests with visible browser (debugging)
-    deps: [_gen-playwright, _install-bun, _install-playwright, _setup-logs]
-    cmds:
-      - cd {{.DIR_TESTS}} && bun playwright test --headed 2>&1 | tee ../{{.FILE_PLAYWRIGHT_HEADED_LOG}}
-
-  test_playwright_ui:
-    desc: Run Playwright tests with interactive UI (best for development)
-    deps: [_gen-playwright, _install-bun, _install-playwright, _setup-logs]
+  # Automated Testing with GUI (Opens Playwright UI or browser windows)
+  test-ui:
+    desc: "[GUI] Playwright interactive UI (RECOMMENDED - single window, full control)"
+    deps: [_internal_gen_playwright, _internal_install_bun, _internal_install_playwright_deps, _internal_setup_logs]
     cmds:
       - cd {{.DIR_TESTS}} && bun playwright test --ui 2>&1 | tee ../{{.FILE_PLAYWRIGHT_UI_LOG}}
 
-  test_playwright_debug:
-    desc: Run Playwright tests in debug mode (step through tests)
-    deps: [_gen-playwright, _install-bun, _install-playwright, _setup-logs]
+  test-debug:
+    desc: "[GUI] Playwright step-through debugging mode"
+    deps: [_internal_gen_playwright, _internal_install_bun, _internal_install_playwright_deps, _internal_setup_logs]
     cmds:
       - cd {{.DIR_TESTS}} && bun playwright test --debug 2>&1 | tee ../{{.FILE_PLAYWRIGHT_DEBUG_LOG}}
 
-  _gen-playwright:
-    internal: true
+  test-chromium:
+    desc: "[GUI] Run tests in Chromium only (headed mode)"
+    deps: [_internal_gen_playwright, _internal_install_bun, _internal_install_playwright_deps, _internal_setup_logs]
+    cmds:
+      - cd {{.DIR_TESTS}} && bun playwright test --headed --project=chromium 2>&1 | tee ../{{.FILE_PLAYWRIGHT_HEADED_LOG}}
+
+  test-webkit:
+    desc: "[GUI] Run tests in WebKit/Safari only (headed mode)"
+    deps: [_internal_gen_playwright, _internal_install_bun, _internal_install_playwright_deps, _internal_setup_logs]
+    cmds:
+      - cd {{.DIR_TESTS}} && bun playwright test --headed --project=webkit 2>&1 | tee ../{{.FILE_PLAYWRIGHT_HEADED_LOG}}
+
+  test-report:
+    desc: "[GUI] Open HTML test report in browser"
+    cmds:
+      - cd {{.DIR_TESTS}} && bun playwright show-report
+
+  # Internal tasks
+  _internal_gen_playwright:
+    desc: Generate Playwright test specs from test-matrix.yml
     deps: [_install-bun]
     sources:
       - "{{.DIR_TESTS}}/test-matrix.yml"
@@ -195,68 +217,44 @@ tasks:
     cmds:
       - cd {{.DIR_TESTS}} && bun run scripts/gen-playwright-tests.ts
 
-  test_logging:
-    desc: Test enhanced logging - starts server, makes requests, shows logs with session metadata
-    deps: [kill, clean]
-    cmds:
-      - |
-        # Start server in background
-        task dev > /dev/null 2>&1 &
-        DEV_PID=$!
-        echo "🚀 Starting server (PID: $DEV_PID)..."
-        sleep 8
-
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        echo "  📋 Making test requests..."
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        curl -k -s https://localhost:{{.PORT_HTTPS}}/ > /dev/null && echo "✅ Request 1 complete"
-        sleep 1
-        curl -k -s https://localhost:{{.PORT_HTTPS}}/ > /dev/null && echo "✅ Request 2 complete"
-        echo ""
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        echo "  📝 Enhanced Logging Output"
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        tail -30 {{.FILE_SERVER_LOG}} | grep -E "\[info\]|\[debug\]|\[warn\]|\[error\]"
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        echo ""
-
-        # Clean up
-        task kill
-        echo "✅ Enhanced logging test complete"
-        echo "📄 Full logs available in: {{.FILE_SERVER_LOG}}"
-
-  # Internal tasks
-  _setup-logs:
-    internal: true
+  _internal_setup_logs:
+    desc: Create logs directory if it doesn't exist
     cmds:
       - mkdir -p {{.DIR_LOGS}}
     status:
       - test -d {{.DIR_LOGS}}
 
-  _install-air:
-    internal: true
+  _internal_install_air:
+    desc: Install Air live reload tool
     cmds:
       - go install github.com/air-verse/air@latest
     status:
       - test -f $(go env GOPATH)/bin/air
 
-  _install-caddy:
-    internal: true
+  _internal_install_caddy:
+    desc: Install Caddy web server
     cmds:
       - go install github.com/caddyserver/caddy/v2/cmd/caddy@latest
     status:
       - test -f $(go env GOPATH)/bin/caddy
 
-  _install-mkcert:
-    internal: true
+  _internal_install_mkcert:
+    desc: Install mkcert for local HTTPS certificates
     cmds:
-      - go install filippo.io/mkcert@latest
-      - mkcert -install
+      - |
+        if [ ! -f $(go env GOPATH)/bin/mkcert ]; then
+          go install filippo.io/mkcert@latest
+        fi
+      - |
+        if ! mkcert -CAROOT &>/dev/null || [ ! -d "$(mkcert -CAROOT)" ]; then
+          mkcert -install
+        fi
     status:
       - test -f $(go env GOPATH)/bin/mkcert
+      - test -d "$(mkcert -CAROOT 2>/dev/null)"
 
-  _generate-certs:
-    internal: true
+  _internal_generate_certs:
+    desc: Generate SSL certificates for localhost and LAN IP
     cmds:
       - |
         LAN_IP=$(ifconfig | grep "inet " | grep -v 127.0.0.1 | awk '{print $2}' | head -n1)
@@ -270,8 +268,8 @@ tasks:
       - "{{.FILE_CERT}}"
       - "{{.FILE_KEY}}"
 
-  _generate-caddyfile:
-    internal: true
+  _internal_generate_caddyfile:
+    desc: Generate Caddyfile from template with Taskfile variables
     sources:
       - Caddyfile.template
       - Taskfile.yml
@@ -286,9 +284,9 @@ tasks:
             -e 's|{{"{{"}}\.PORT_BACKEND{{"}}"}}|{{.PORT_BACKEND}}|g' \
             Caddyfile.template > {{.FILE_CADDYFILE}}
 
-  _start-caddy:
-    internal: true
-    deps: [_setup-logs, _generate-caddyfile]
+  _internal_start_caddy:
+    desc: Start Caddy reverse proxy in background
+    deps: [_internal_setup_logs, _internal_generate_caddyfile]
     cmds:
       - |
         # Stop any existing Caddy
@@ -299,9 +297,9 @@ tasks:
         echo $! > {{.FILE_CADDY_PID}}
         sleep 2
 
-  _setup-air:
-    internal: true
-    deps: [_setup-logs]
+  _internal_setup_air:
+    desc: Configure Air live reload with session mode
+    deps: [_internal_setup_logs]
     vars:
       SESSION_MODE: '{{.SESSION_MODE | default "cookie"}}'
     cmds:
@@ -339,8 +337,8 @@ tasks:
         EOF
         echo "✅ Air configured for session mode: {{.SESSION_MODE}}"
 
-  _install-bun:
-    internal: true
+  _internal_install_bun:
+    desc: Install Bun JavaScript runtime
     cmds:
       - |
         if ! command -v bun &> /dev/null; then
@@ -351,9 +349,9 @@ tasks:
     status:
       - command -v bun
 
-  _install-playwright:
-    internal: true
-    deps: [_install-bun]
+  _internal_install_playwright_deps:
+    desc: Install Playwright and its browser dependencies
+    deps: [_internal_install_bun]
     cmds:
       - |
         if [ ! -d "{{.DIR_NODE_MODULES}}/playwright" ]; then
@@ -362,15 +360,15 @@ tasks:
         fi
       - |
         if [ ! -d "{{.DIR_PLAYWRIGHT_CACHE}}" ]; then
-          echo "📦 Installing Playwright browsers..."
-          cd {{.DIR_TESTS}} && bun playwright install
+          echo "📦 Installing Playwright browsers (headless)..."
+          cd {{.DIR_TESTS}} && bun playwright install --with-deps
         fi
     status:
       - test -d {{.DIR_NODE_MODULES}}/playwright
       - test -d {{.DIR_PLAYWRIGHT_CACHE}}
 
-  _print-urls:
-    internal: true
+  _internal_print_urls:
+    desc: Print development server URLs
     silent: true
     cmds:
       - |
@@ -389,7 +387,7 @@ tasks:
         echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
         echo ""
 
-  gen_gitignore:
+  _internal_gen_gitignore:
     desc: Generate .gitignore from Taskfile variables (keeps in sync with build artifacts)
     cmds:
       - |
@@ -417,11 +415,10 @@ tasks:
         # macOS
         .DS_Store
 
-        # Testing (all test artifacts in tests/ directory)
+        # Testing
         {{.DIR_NODE_MODULES}}/
         {{.DIR_TESTS}}/bun.lockb
-        {{.DIR_PLAYWRIGHT_REPORT}}/
-        {{.DIR_TEST_RESULTS}}/
+        {{.DIR_TEST_OUTPUTS}}/
         {{.DIR_TESTS}}/.playwright/
         EOF
         echo "✅ Generated .gitignore from Taskfile variables"

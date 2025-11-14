@@ -8,8 +8,6 @@ import { test, expect, Page, Browser } from '@playwright/test';
  */
 
 test.describe('URL mode: No parameter creates new session', () => {
-  let serverProcess: any;
-
   test.beforeAll(async () => {
     // TODO: Start server with environment variables
     // {
@@ -45,7 +43,10 @@ test.describe('URL mode: No parameter creates new session', () => {
     expect(source).toBe('new');
 
     // Click #increment
-    await page1.getByRole('button', { name: 'Increment' }).click();
+    await Promise.all([
+      page1.waitForResponse(resp => resp.url().includes('/_action/')),
+      page1.getByRole('button', { name: 'Increment' }).click()
+    ]);
 
     // Wait 1000ms
     await page1.waitForTimeout(1000);

@@ -8,8 +8,6 @@ import { test, expect, Page, Browser } from '@playwright/test';
  */
 
 test.describe('Both mode: URL parameter wins over cookie', () => {
-  let serverProcess: any;
-
   test.beforeAll(async () => {
     // TODO: Start server with environment variables
     // {

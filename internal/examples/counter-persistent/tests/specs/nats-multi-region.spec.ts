@@ -1,4 +1,6 @@
 import { test, expect, Page, Browser } from '@playwright/test';
+import { ChildProcess } from 'child_process';
+import { startServer, stopServer } from '../scripts/server-utils';
 
 /**
  * NATS: Multi-region sync
@@ -8,19 +10,16 @@ import { test, expect, Page, Browser } from '@playwright/test';
  */
 
 test.describe('NATS: Multi-region sync', () => {
+  let serverProcess: ChildProcess | null = null;
+
   test.beforeAll(async () => {
-    // TODO: Start server with environment variables
-    // {
-    //   "VIA_SESSION_MODE": "both",
-    //   "VIA_STATE_STORE": "nats",
-    //   "VIA_NATS_URL": "nats://localhost:4222"
-    // }
-    console.log('⚠️  Start server manually with: task dev-nats');
+    // Start server with correct configuration
+    serverProcess = await startServer('dev-nats');
   });
 
   test.afterAll(async () => {
-    // TODO: Stop server
-    console.log('⚠️  Stop server manually with: task kill');
+    // Stop server and cleanup
+    await stopServer(serverProcess);
   });
 
   test('nats-multi-region', async ({ browser }) => {

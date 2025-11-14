@@ -21,9 +21,10 @@ localhost-key.pem
 # macOS
 .DS_Store
 
-# Testing (all test artifacts in tests/ directory)
+# Testing
 tests/node_modules/
 tests/bun.lockb
+tests/outputs/
 tests/playwright-report/
 tests/test-results/
 tests/.playwright/

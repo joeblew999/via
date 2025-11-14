@@ -7,6 +7,7 @@
 
 import { readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { parse } from 'yaml';
+import { ChildProcess } from 'child_process';
 
 // Read and parse test-matrix.yml
 const yamlContent = readFileSync('test-matrix.yml', 'utf-8');
@@ -41,6 +42,8 @@ function generateTestCode(test: any, matrix: any): string {
   const config = matrix.configs.find((c: any) => c.id === test.config);
 
   return `import { test, expect, Page, Browser } from '@playwright/test';
+import { ChildProcess } from 'child_process';
+import { startServer, stopServer } from '../scripts/server-utils';
 
 /**
  * ${test.name}
@@ -50,17 +53,16 @@ function generateTestCode(test: any, matrix: any): string {
  */
 
 test.describe('${test.name}', () => {
-  let serverProcess: any;
+  let serverProcess: ChildProcess | null = null;
 
   test.beforeAll(async () => {
-    // TODO: Start server with environment variables
-    // ${JSON.stringify(config.env || {}, null, 2).split('\n').join('\n    // ')}
-    console.log('⚠️  Start server manually with: task ${config.task}');
+    // Start server with correct configuration
+    serverProcess = await startServer('${config.task}');
   });
 
   test.afterAll(async () => {
-    // TODO: Stop server
-    console.log('⚠️  Stop server manually with: task kill');
+    // Stop server and cleanup
+    await stopServer(serverProcess);
   });
 
   test('${test.id}', async ({ browser }) => {

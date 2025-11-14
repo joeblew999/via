@@ -2,6 +2,11 @@
 
 Demonstrates Via's state persistence and multi-tab synchronization features.
 
+## 📊 Live Test Reports
+
+View automated test results on GitHub Pages (updated after each push to `main`):
+- **[Test Reports Dashboard](https://YOUR_USERNAME.github.io/YOUR_REPO/)** - Interactive HTML reports for all test modes
+
 ## What It Shows
 
 - **State Persistence** - Counter value survives page refreshes
@@ -26,9 +31,9 @@ go install github.com/go-task/task/v3/cmd/task@latest
 ## Running
 
 ```bash
-task          # List all available tasks
-task dev      # Start HTTPS development server with live reload
-task kill     # Stop server
+task           # List all available tasks
+task dev       # Start HTTPS development server with live reload
+task dev-kill  # Stop server
 ```
 
 Opens at **https://localhost:3443** (and your LAN IP for mobile testing).
@@ -36,25 +41,114 @@ Opens at **https://localhost:3443** (and your LAN IP for mobile testing).
 **Live reload:** Edit code, save, auto-restarts.
 **Certificates:** Uses mkcert for trusted local HTTPS (works on localhost AND LAN).
 
-## Automated Testing
+## Testing
 
-**Quick setup for multi-window testing:**
+**Tests are self-contained** - they automatically start/stop the correct server configuration!
 
+### For CI/CD (Headless)
 ```bash
-task test-safari    # Opens 2 Safari windows side-by-side
-task test-chrome    # Opens 2 Chrome windows side-by-side
-task test-firefox   # Opens 2 Firefox windows side-by-side
+task test   # Run all tests (CI-safe, no GUI)
 ```
 
-Each command:
-- Kills existing browser instances (avoids race conditions)
-- Opens 2 separate windows with your LAN IP
-- Positions windows side-by-side automatically
-- Ready to test multi-tab sync immediately!
+### For Development (GUI)
+```bash
+task test-ui       # Interactive Playwright UI (RECOMMENDED)
+task test-debug    # Step through tests
+task test-chromium # Run tests in Chromium only
+task test-webkit   # Run tests in WebKit/Safari only
+task test-report   # Open HTML report in browser
+```
+
+**Note:** Tests automatically manage server lifecycle - no need to manually start servers!
+
+### Manual Multi-Window Testing
+```bash
+task dev-open-safari   # Opens 2 Safari windows side-by-side
+task dev-open-chrome   # Opens 2 Chrome windows side-by-side
+task dev-open-firefox  # Opens 2 Firefox windows side-by-side
+```
+
+**For manual testing:** Start server first with `task dev`, then use these commands.
 
 **Note:** Firefox requires Accessibility permissions:
 - System Preferences > Security & Privacy > Privacy > Accessibility
 - Add Terminal (or your script runner)
+
+## Test Reports
+
+Playwright automatically generates multiple report formats in `tests/outputs/`:
+
+```
+tests/outputs/
+├── reports/           # Test reports
+│   ├── html/         # Interactive HTML report
+│   ├── results.json  # Machine-readable JSON
+│   └── junit.xml     # CI integration (JUnit format)
+└── artifacts/        # Test artifacts
+    ├── videos/       # .webm videos (failures only)
+    ├── screenshots/  # .png screenshots (failures only)
+    └── traces/       # Playwright traces (for debugging)
+```
+
+### HTML Report (Interactive)
+- **View:** `task test-report`
+- Features: Videos, screenshots, traces, step-by-step debugging
+- Best for: Local development and debugging
+
+### JSON Report (Machine-readable)
+- **Path:** `tests/outputs/reports/results.json`
+- Best for: CI/CD integration, custom reporting
+
+### JUnit XML (CI Integration)
+- **Path:** `tests/outputs/reports/junit.xml`
+- Best for: GitHub Actions, Jenkins, GitLab CI
+
+### Artifacts (Videos, Screenshots, Traces)
+- **Path:** `tests/outputs/artifacts/`
+- Captured automatically on test failures
+- Videos: `.webm` format, Screenshots: `.png` format
+- Traces: Time-travel debugging in Playwright UI
+
+### GitHub Actions Integration
+
+Playwright automatically enables enhanced CI features when `CI=true`:
+- GitHub annotations show test failures inline in PRs
+- Retries failing tests 2 times automatically
+- Captures traces on failures for debugging
+
+**Matrix Strategy for Multiple Server Configurations:**
+
+The CI workflow uses a matrix strategy to test different session modes:
+- **Cookie Mode**: Tests cookie-based sessions (cookie-*.spec.ts)
+- **URL Mode**: Tests URL parameter sessions (url-*.spec.ts)
+- **Hybrid Mode**: Tests URL + Cookie fallback (both-*.spec.ts)
+
+Each matrix job runs tests independently, with tests managing their own server lifecycle.
+
+**Example workflow** (`.github/workflows/test.yml`):
+```yaml
+jobs:
+  test:
+    strategy:
+      matrix:
+        config:
+          - name: "Cookie Mode"
+            tests: "cookie-*.spec.ts config-visibility.spec.ts"
+          - name: "URL Mode"
+            tests: "url-*.spec.ts"
+          - name: "Hybrid Mode"
+            tests: "both-*.spec.ts"
+
+    steps:
+      - name: Run tests
+        run: cd tests && bun playwright test ${{ matrix.config.tests }}
+        env:
+          CI: true
+```
+
+**Tests handle server management automatically** - no manual start/stop needed!
+
+See [`.github/workflows/test.yml`](.github/workflows/test.yml) for complete example.
 
 ## Manual Testing Multi-Tab Sync
 
@@ -88,7 +182,7 @@ Background tabs will sync when you switch back to them.
 - Clear browser cookies and refresh
 
 **Port already in use?**
-- Run `task kill` to stop existing processes
+- Run `task dev-kill` to stop existing processes
 - Or manually: `lsof -ti:3000 :3443 | xargs kill -9`
 
 **Multi-tab sync not working?**

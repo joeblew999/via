@@ -1,4 +1,6 @@
 import { test, expect, Page, Browser } from '@playwright/test';
+import { ChildProcess } from 'child_process';
+import { startServer, stopServer } from '../scripts/server-utils';
 
 /**
  * Cookie mode: Same browser multi-tab sync
@@ -8,17 +10,16 @@ import { test, expect, Page, Browser } from '@playwright/test';
  */
 
 test.describe('Cookie mode: Same browser multi-tab sync', () => {
+  let serverProcess: ChildProcess | null = null;
+
   test.beforeAll(async () => {
-    // TODO: Start server with environment variables
-    // {
-    //   "VIA_SESSION_MODE": "cookie"
-    // }
-    console.log('⚠️  Start server manually with: task dev');
+    // Start server with correct configuration
+    serverProcess = await startServer('dev');
   });
 
   test.afterAll(async () => {
-    // TODO: Stop server
-    console.log('⚠️  Stop server manually with: task kill');
+    // Stop server and cleanup
+    await stopServer(serverProcess);
   });
 
   test('cookie-same-browser', async ({ browser }) => {

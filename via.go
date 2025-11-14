@@ -41,41 +41,57 @@ type V struct {
 }
 
 func (v *V) logErr(c *Context, format string, a ...any) {
-	cRef := ""
-	if c != nil && c.id != "" {
-		cRef = fmt.Sprintf("via-ctx=%q ", c.id)
-	}
+	cRef := v.formatContextRef(c)
 	log.Printf("[error] %smsg=%q", cRef, fmt.Sprintf(format, a...))
 }
 
 func (v *V) logWarn(c *Context, format string, a ...any) {
-	cRef := ""
-	if c != nil && c.id != "" {
-		cRef = fmt.Sprintf("via-ctx=%q ", c.id)
-	}
 	if v.cfg.LogLvl >= LogLevelWarn {
+		cRef := v.formatContextRef(c)
 		log.Printf("[warn] %smsg=%q", cRef, fmt.Sprintf(format, a...))
 	}
 }
 
 func (v *V) logInfo(c *Context, format string, a ...any) {
-	cRef := ""
-	if c != nil && c.id != "" {
-		cRef = fmt.Sprintf("via-ctx=%q ", c.id)
-	}
 	if v.cfg.LogLvl >= LogLevelInfo {
+		cRef := v.formatContextRef(c)
 		log.Printf("[info] %smsg=%q", cRef, fmt.Sprintf(format, a...))
 	}
 }
 
 func (v *V) logDebug(c *Context, format string, a ...any) {
-	cRef := ""
-	if c != nil && c.id != "" {
-		cRef = fmt.Sprintf("via-ctx=%q ", c.id)
-	}
 	if v.cfg.LogLvl == LogLevelDebug {
+		cRef := v.formatContextRef(c)
 		log.Printf("[debug] %smsg=%q", cRef, fmt.Sprintf(format, a...))
 	}
+}
+
+// formatContextRef builds a structured log prefix with context metadata
+func (v *V) formatContextRef(c *Context) string {
+	if c == nil || c.id == "" {
+		return ""
+	}
+
+	// Build structured context reference
+	ref := fmt.Sprintf("via-ctx=%q", c.id)
+
+	// Add session info if available (for debugging multi-tab/session issues)
+	if c.sessionID != "" {
+		ref += fmt.Sprintf(" session=%q", c.sessionID)
+		ref += fmt.Sprintf(" session-source=%q", c.sessionSource)
+	}
+
+	// Add session mode for clarity
+	if v.cfg.SessionMode != SessionModeCookie {
+		ref += fmt.Sprintf(" session-mode=%q", v.cfg.SessionMode.String())
+	}
+
+	// Add route if available (helps track which page the log is from)
+	if c.route != "" {
+		ref += fmt.Sprintf(" route=%q", c.route)
+	}
+
+	return ref + " "
 }
 
 // GetConfig returns the current configuration.

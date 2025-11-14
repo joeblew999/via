@@ -1,57 +1,60 @@
 import { test, expect, Page, Browser } from '@playwright/test';
+import { ChildProcess } from 'child_process';
+import { startServer, stopServer } from '../scripts/server-utils';
 
 /**
- * NATS: Multi-region sync
+ * Both mode: Cookie fallback when no URL param
  *
- * Configuration: NATS JetStream + URL
- * Description: Multi-region sync with NATS JetStream
+ * Configuration: Hybrid Mode (URL + Cookie)
+ * Description: URL parameter wins, falls back to cookie
  */
 
-test.describe('NATS: Multi-region sync', () => {
+test.describe('Both mode: Cookie fallback when no URL param', () => {
+  let serverProcess: ChildProcess | null = null;
+
   test.beforeAll(async () => {
-    // TODO: Start server with environment variables
-    // {
-    //   "VIA_SESSION_MODE": "both",
-    //   "VIA_STATE_STORE": "nats",
-    //   "VIA_NATS_URL": "nats://localhost:4222"
-    // }
-    console.log('⚠️  Start server manually with: task dev-nats');
+    // Start server with correct configuration
+    serverProcess = await startServer('dev-both');
   });
 
   test.afterAll(async () => {
-    // TODO: Stop server
-    console.log('⚠️  Stop server manually with: task kill');
+    // Stop server and cleanup
+    await stopServer(serverProcess);
   });
 
-  test('nats-multi-region', async ({ browser }) => {
+  test('both-cookie-fallback', async ({ browser }) => {
     // Create browser context and pages
+    // Create context (shared cookies/session)
     const context = await browser.newContext({ ignoreHTTPSErrors: true });
-    const page = await context.newPage();
-    await page.goto('/');
+    const page1 = await context.newPage();
+    const page2 = await context.newPage();
+    await page1.goto('/');
+    await page2.goto('/');
 
 
     // Test steps
     // Assert session IDs are same
-    // 
+    // Both windows use cookie (no URL param)
     const sessionId1 = await getSessionId(page1);
     const sessionId2 = await getSessionId(page2);
     expect(sessionId1 === sessionId2).toBeTruthy();
 
-    // TODO: Implement action 'assert_state_store'
-    // {"action":"assert_state_store","expect":"nats"}
+    // Assert session source is 'cookie'
+    const source = await getSessionSource(page);
+    expect(source).toBe('cookie');
 
     // Click #increment
     await Promise.all([
-      page.waitForResponse(resp => resp.url().includes('/_action/')),
-      page.getByRole('button', { name: 'Increment' }).click()
+      page1.waitForResponse(resp => resp.url().includes('/_action/')),
+      page1.getByRole('button', { name: 'Increment' }).click()
     ]);
 
-    // Wait 1000ms
-    await page1.waitForTimeout(1000);
+    // Wait 500ms
+    await page1.waitForTimeout(500);
 
     // Assert counter value is 1
-    // Chrome in EU region syncs with Safari in US region
-    const counter0 = await getCounterValue(page);
+    // Cookie-based sync works
+    const counter0 = await getCounterValue(page2);
     expect(counter0).toBe(1);
 
 

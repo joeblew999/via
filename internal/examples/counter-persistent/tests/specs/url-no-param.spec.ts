@@ -1,27 +1,28 @@
 import { test, expect, Page, Browser } from '@playwright/test';
+import { ChildProcess } from 'child_process';
+import { startServer, stopServer } from '../scripts/server-utils';
 
 /**
- * Cookie mode: Same browser multi-tab sync
+ * URL mode: No parameter creates new session
  *
- * Configuration: Cookie Mode (Default)
- * Description: Traditional session cookies, single browser only
+ * Configuration: URL Parameter Mode
+ * Description: Session ID in URL, works across browsers
  */
 
-test.describe('Cookie mode: Same browser multi-tab sync', () => {
+test.describe('URL mode: No parameter creates new session', () => {
+  let serverProcess: ChildProcess | null = null;
+
   test.beforeAll(async () => {
-    // TODO: Start server with environment variables
-    // {
-    //   "VIA_SESSION_MODE": "cookie"
-    // }
-    console.log('⚠️  Start server manually with: task dev');
+    // Start server with correct configuration
+    serverProcess = await startServer('dev-url');
   });
 
   test.afterAll(async () => {
-    // TODO: Stop server
-    console.log('⚠️  Stop server manually with: task kill');
+    // Stop server and cleanup
+    await stopServer(serverProcess);
   });
 
-  test('cookie-same-browser', async ({ browser }) => {
+  test('url-no-param', async ({ browser }) => {
     // Create browser context and pages
     // Create context (shared cookies/session)
     const context = await browser.newContext({ ignoreHTTPSErrors: true });
@@ -32,11 +33,15 @@ test.describe('Cookie mode: Same browser multi-tab sync', () => {
 
 
     // Test steps
-    // Assert session IDs are same
-    // Both Safari windows should have same session ID
+    // Assert session IDs are different
+    // Each window gets NEW session (no cookie in URL mode)
     const sessionId1 = await getSessionId(page1);
     const sessionId2 = await getSessionId(page2);
-    expect(sessionId1 === sessionId2).toBeTruthy();
+    expect(sessionId1 !== sessionId2).toBeTruthy();
+
+    // Assert session source is 'new'
+    const source = await getSessionSource(page);
+    expect(source).toBe('new');
 
     // Click #increment
     await Promise.all([
@@ -44,40 +49,18 @@ test.describe('Cookie mode: Same browser multi-tab sync', () => {
       page1.getByRole('button', { name: 'Increment' }).click()
     ]);
 
-    // Wait 500ms
-    await page1.waitForTimeout(500);
+    // Wait 1000ms
+    await page1.waitForTimeout(1000);
 
     // Assert counter value is 1
     // 
     const counter0 = await getCounterValue(page1);
     expect(counter0).toBe(1);
 
-    // Assert counter value is 1
-    // Window 2 should sync immediately
+    // Assert counter value is 0
+    // Windows do NOT sync (different sessions)
     const counter1 = await getCounterValue(page2);
-    expect(counter1).toBe(1);
-
-    // Refresh page
-    await page2.reload();
-
-    // Assert counter value is 1
-    // Counter persists after refresh
-    const counter2 = await getCounterValue(page2);
-    expect(counter2).toBe(1);
-
-    // Click #increment
-    await Promise.all([
-      page2.waitForResponse(resp => resp.url().includes('/_action/')),
-      page2.getByRole('button', { name: 'Increment' }).click()
-    ]);
-
-    // Wait 500ms
-    await page1.waitForTimeout(500);
-
-    // Assert counter value is 2
-    // Window 1 syncs after window 2 increment
-    const counter3 = await getCounterValue(page1);
-    expect(counter3).toBe(2);
+    expect(counter1).toBe(0);
 
 
     

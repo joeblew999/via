@@ -1,29 +1,28 @@
 import { test, expect, Page, Browser } from '@playwright/test';
+import { ChildProcess } from 'child_process';
+import { startServer, stopServer } from '../scripts/server-utils';
 
 /**
- * NATS: Multi-region sync
+ * Cookie mode: Cross-browser isolation
  *
- * Configuration: NATS JetStream + URL
- * Description: Multi-region sync with NATS JetStream
+ * Configuration: Cookie Mode (Default)
+ * Description: Traditional session cookies, single browser only
  */
 
-test.describe('NATS: Multi-region sync', () => {
+test.describe('Cookie mode: Cross-browser isolation', () => {
+  let serverProcess: ChildProcess | null = null;
+
   test.beforeAll(async () => {
-    // TODO: Start server with environment variables
-    // {
-    //   "VIA_SESSION_MODE": "both",
-    //   "VIA_STATE_STORE": "nats",
-    //   "VIA_NATS_URL": "nats://localhost:4222"
-    // }
-    console.log('⚠️  Start server manually with: task dev-nats');
+    // Start server with correct configuration
+    serverProcess = await startServer('dev');
   });
 
   test.afterAll(async () => {
-    // TODO: Stop server
-    console.log('⚠️  Stop server manually with: task kill');
+    // Stop server and cleanup
+    await stopServer(serverProcess);
   });
 
-  test('nats-multi-region', async ({ browser }) => {
+  test('cookie-cross-browser', async ({ browser }) => {
     // Create browser context and pages
     const context = await browser.newContext({ ignoreHTTPSErrors: true });
     const page = await context.newPage();
@@ -31,14 +30,11 @@ test.describe('NATS: Multi-region sync', () => {
 
 
     // Test steps
-    // Assert session IDs are same
-    // 
+    // Assert session IDs are different
+    // Safari and Chrome should have different session IDs
     const sessionId1 = await getSessionId(page1);
     const sessionId2 = await getSessionId(page2);
-    expect(sessionId1 === sessionId2).toBeTruthy();
-
-    // TODO: Implement action 'assert_state_store'
-    // {"action":"assert_state_store","expect":"nats"}
+    expect(sessionId1 !== sessionId2).toBeTruthy();
 
     // Click #increment
     await Promise.all([
@@ -50,9 +46,14 @@ test.describe('NATS: Multi-region sync', () => {
     await page1.waitForTimeout(1000);
 
     // Assert counter value is 1
-    // Chrome in EU region syncs with Safari in US region
+    // 
     const counter0 = await getCounterValue(page);
     expect(counter0).toBe(1);
+
+    // Assert counter value is 0
+    // Chrome should NOT sync (different session)
+    const counter1 = await getCounterValue(page);
+    expect(counter1).toBe(0);
 
 
     

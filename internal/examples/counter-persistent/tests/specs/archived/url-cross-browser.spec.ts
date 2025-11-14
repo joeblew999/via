@@ -8,8 +8,6 @@ import { test, expect, Page, Browser } from '@playwright/test';
  */
 
 test.describe('URL mode: Cross-browser sync', () => {
-  let serverProcess: any;
-
   test.beforeAll(async () => {
     // TODO: Start server with environment variables
     // {
@@ -42,7 +40,10 @@ test.describe('URL mode: Cross-browser sync', () => {
     expect(source).toBe('url-param');
 
     // Click #increment
-    await page.getByRole('button', { name: 'Increment' }).click();
+    await Promise.all([
+      page.waitForResponse(resp => resp.url().includes('/_action/')),
+      page.getByRole('button', { name: 'Increment' }).click()
+    ]);
 
     // Wait 500ms
     await page1.waitForTimeout(500);

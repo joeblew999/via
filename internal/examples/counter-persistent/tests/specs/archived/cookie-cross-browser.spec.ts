@@ -8,8 +8,6 @@ import { test, expect, Page, Browser } from '@playwright/test';
  */
 
 test.describe('Cookie mode: Cross-browser isolation', () => {
-  let serverProcess: any;
-
   test.beforeAll(async () => {
     // TODO: Start server with environment variables
     // {
@@ -38,7 +36,10 @@ test.describe('Cookie mode: Cross-browser isolation', () => {
     expect(sessionId1 !== sessionId2).toBeTruthy();
 
     // Click #increment
-    await page.getByRole('button', { name: 'Increment' }).click();
+    await Promise.all([
+      page.waitForResponse(resp => resp.url().includes('/_action/')),
+      page.getByRole('button', { name: 'Increment' }).click()
+    ]);
 
     // Wait 1000ms
     await page1.waitForTimeout(1000);

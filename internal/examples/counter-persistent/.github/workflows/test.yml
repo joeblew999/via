@@ -1,0 +1,71 @@
+name: Test
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        config:
+          - name: "Cookie Mode"
+            tests: "cookie-*.spec.ts config-visibility.spec.ts"
+          - name: "URL Mode"
+            tests: "url-*.spec.ts"
+          - name: "Hybrid Mode"
+            tests: "both-*.spec.ts"
+          # Skipping NATS mode in CI (requires NATS server)
+          # - name: "NATS Mode"
+          #   tests: "nats-*.spec.ts"
+      fail-fast: false
+
+    name: ${{ matrix.config.name }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v1
+        with:
+          bun-version: latest
+
+      - name: Install Task
+        run: go install github.com/go-task/task/v3/cmd/task@latest
+
+      - name: Run Playwright tests (${{ matrix.config.tests }})
+        run: cd tests && bun playwright test ${{ matrix.config.tests }}
+        env:
+          CI: true
+
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-${{ matrix.config.name }}
+          path: tests/outputs/reports/
+          retention-days: 30
+
+      - name: Upload test artifacts (videos, screenshots, traces)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-artifacts-${{ matrix.config.name }}
+          path: tests/outputs/artifacts/
+          retention-days: 7
+
+      - name: Publish test results
+        if: always()
+        uses: EnricoMi/publish-unit-test-result-action@v2
+        with:
+          junit_files: tests/outputs/reports/junit.xml
+          check_name: Test Results (${{ matrix.config.name }})

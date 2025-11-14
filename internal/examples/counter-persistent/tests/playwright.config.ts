@@ -14,6 +14,9 @@ import { defineConfig, devices } from '@playwright/test';
 export default defineConfig({
   testDir: './specs',
 
+  // Output directory structure (professional organization)
+  outputDir: './outputs/artifacts',  // Videos, screenshots, traces
+
   // Ignore archived tests
   testIgnore: '**/archived/**',
 
@@ -31,8 +34,12 @@ export default defineConfig({
 
   // Reporter to use
   reporter: [
-    ['html'],
-    ['list']
+    ['html', { outputFolder: 'outputs/reports/html', open: 'never' }],
+    ['json', { outputFile: 'outputs/reports/results.json' }],
+    ['junit', { outputFile: 'outputs/reports/junit.xml' }],
+    ['list'],
+    // GitHub Actions reporter (only in CI)
+    ...(process.env.CI ? [['github'] as const] : []),
   ],
 
   // Shared settings for all the projects below
@@ -40,13 +47,15 @@ export default defineConfig({
     // Base URL to use in actions like `await page.goto('/')`
     baseURL: 'https://localhost:3443',
 
-    // Collect trace when retrying the failed test
-    trace: 'on-first-retry',
+    // Collect trace (for time-travel debugging in Playwright UI)
+    // 'on-first-retry' = only on retry, 'retain-on-failure' = keep on failure
+    trace: process.env.CI ? 'retain-on-failure' : 'on-first-retry',
 
-    // Screenshot on failure
+    // Screenshot: 'on' = always, 'only-on-failure' = on failure, 'off' = never
     screenshot: 'only-on-failure',
 
-    // Video on failure
+    // Video: 'on' = always, 'retain-on-failure' = keep on failure, 'off' = never
+    // Videos saved to test-results/ directory
     video: 'retain-on-failure',
 
     // Ignore HTTPS errors (we're using self-signed certs)

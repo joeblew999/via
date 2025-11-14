@@ -8,8 +8,6 @@ import { test, expect, Page, Browser } from '@playwright/test';
  */
 
 test.describe('Both mode: Cookie fallback when no URL param', () => {
-  let serverProcess: any;
-
   test.beforeAll(async () => {
     // TODO: Start server with environment variables
     // {
@@ -45,7 +43,10 @@ test.describe('Both mode: Cookie fallback when no URL param', () => {
     expect(source).toBe('cookie');
 
     // Click #increment
-    await page1.getByRole('button', { name: 'Increment' }).click();
+    await Promise.all([
+      page1.waitForResponse(resp => resp.url().includes('/_action/')),
+      page1.getByRole('button', { name: 'Increment' }).click()
+    ]);
 
     // Wait 500ms
     await page1.waitForTimeout(500);
